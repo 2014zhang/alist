@@ -71,6 +71,11 @@ func (d *PikPak) Link(ctx context.Context, file model.Obj, args model.LinkArgs) 
 	link := model.Link{
 		URL: resp.WebContentLink,
 	}
+
+	if resp.Kind != "drive#folder"{
+		log.Infof("PikPak://%s|%s|%s", resp.Name, resp.Size, resp.Hash)
+	}
+
 	if len(resp.Medias) > 0 && resp.Medias[0].Link.Url != "" {
 		log.Debugln("use media link")
 		link.URL = resp.Medias[0].Link.Url

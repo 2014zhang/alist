@@ -23,6 +23,7 @@ type File struct {
 	Name           string    `json:"name"`
 	ModifiedTime   time.Time `json:"modified_time"`
 	Size           string    `json:"size"`
+	Hash           string    `json:"hash"`
 	ThumbnailLink  string    `json:"thumbnail_link"`
 	WebContentLink string    `json:"web_content_link"`
 	Medias         []Media   `json:"medias"`
