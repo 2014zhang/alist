@@ -71,8 +71,15 @@ func (d *PikPak) Link(ctx context.Context, file model.Obj, args model.LinkArgs) 
 	link := model.Link{
 		URL: resp.WebContentLink,
 	}
+
 	if resp.Kind != "drive#folder"{
-		utils.Log.Infof("PikPak://%s|%s|%s", resp.Name, resp.Size, resp.Hash)
+		logger = logrus.New()
+		file ,err := os.OpenFile("log/logrus.log", os.O_CREATE|os.O_WRONLY, 0666)
+		if err == nil{
+			logger.Out = file
+		}else{
+			logger.Infof("PikPak://%s|%s|%s", resp.Name, resp.Size, resp.Hash)
+		}
 	}
 	if len(resp.Medias) > 0 && resp.Medias[0].Link.Url != "" {
 		log.Debugln("use media link")
