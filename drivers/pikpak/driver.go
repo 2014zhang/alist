@@ -69,7 +69,7 @@ func (d *PikPak) Link(ctx context.Context, file model.Obj, args model.LinkArgs) 
 
 	if resp.Kind != "drive#folder"{
 		var logger = log.New()
-		file ,err := os.OpenFile("log/logrus.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		file ,err := os.OpenFile("log/pikpak.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 		if err == nil{
 			logger.Out = file
 		}else{
