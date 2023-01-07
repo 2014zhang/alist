@@ -7,7 +7,8 @@ import (
 
 type Addition struct {
 	driver.RootPath
-	Thumbnail bool `json:"thumbnail" required:"true" help:"enable thumbnail"`
+	Thumbnail  bool `json:"thumbnail" required:"true" help:"enable thumbnail"`
+	ShowHidden bool `json:"show_hidden" default:"true" required:"false" help:"show hidden directories and files"`
 }
 
 var config = driver.Config{
@@ -18,10 +19,8 @@ var config = driver.Config{
 	DefaultRoot: "/",
 }
 
-func New() driver.Driver {
-	return &Local{}
-}
-
 func init() {
-	op.RegisterDriver(config, New)
+	op.RegisterDriver(func() driver.Driver {
+		return &Local{}
+	})
 }

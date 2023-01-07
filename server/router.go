@@ -16,6 +16,9 @@ func Init(r *gin.Engine) {
 	common.SecretKey = []byte(conf.Conf.JwtSecret)
 	Cors(r)
 	r.Use(middlewares.StoragesLoaded)
+	if conf.Conf.MaxConnections > 0 {
+		r.Use(middlewares.MaxAllowed(conf.Conf.MaxConnections))
+	}
 	WebDav(r.Group("/dav"))
 
 	r.GET("/favicon.ico", handles.Favicon)
@@ -31,6 +34,8 @@ func Init(r *gin.Engine) {
 	auth.POST("/me/update", handles.UpdateCurrent)
 	auth.POST("/auth/2fa/generate", handles.Generate2FA)
 	auth.POST("/auth/2fa/verify", handles.Verify2FA)
+	auth.GET("/auth/github", handles.GithubLoginRedirect)
+	auth.GET("/auth/github_callback", handles.GithubLoginCallback)
 
 	// no need auth
 	public := api.Group("/public")
@@ -68,6 +73,7 @@ func admin(g *gin.RouterGroup) {
 	storage.POST("/delete", handles.DeleteStorage)
 	storage.POST("/enable", handles.EnableStorage)
 	storage.POST("/disable", handles.DisableStorage)
+	storage.POST("/load_all", handles.LoadAllStorages)
 
 	driver := g.Group("/driver")
 	driver.GET("/list", handles.ListDriverInfo)
@@ -107,10 +113,18 @@ func admin(g *gin.RouterGroup) {
 	ms := g.Group("/message")
 	ms.POST("/get", message.HttpInstance.GetHandle)
 	ms.POST("/send", message.HttpInstance.SendHandle)
+
+	index := g.Group("/index")
+	index.POST("/build", middlewares.SearchIndex, handles.BuildIndex)
+	index.POST("/update", middlewares.SearchIndex, handles.UpdateIndex)
+	index.POST("/stop", middlewares.SearchIndex, handles.StopIndex)
+	index.POST("/clear", middlewares.SearchIndex, handles.ClearIndex)
+	index.GET("/progress", middlewares.SearchIndex, handles.GetProgress)
 }
 
 func _fs(g *gin.RouterGroup) {
 	g.Any("/list", handles.FsList)
+	g.Any("/search", middlewares.SearchIndex, handles.Search)
 	g.Any("/get", handles.FsGet)
 	g.Any("/other", handles.FsOther)
 	g.Any("/dirs", handles.FsDirs)
@@ -119,8 +133,8 @@ func _fs(g *gin.RouterGroup) {
 	g.POST("/move", handles.FsMove)
 	g.POST("/copy", handles.FsCopy)
 	g.POST("/remove", handles.FsRemove)
-	g.PUT("/put", handles.FsStream)
-	g.PUT("/form", handles.FsForm)
+	g.PUT("/put", middlewares.FsUp, handles.FsStream)
+	g.PUT("/form", middlewares.FsUp, handles.FsForm)
 	g.POST("/link", middlewares.AuthAdmin, handles.Link)
 	g.POST("/add_aria2", handles.AddAria2)
 }
@@ -128,6 +142,8 @@ func _fs(g *gin.RouterGroup) {
 func Cors(r *gin.Engine) {
 	config := cors.DefaultConfig()
 	config.AllowAllOrigins = true
-	config.AllowHeaders = append(config.AllowHeaders, "Authorization", "range", "File-Path", "As-Task")
+	//config.AllowHeaders = append(config.AllowHeaders, "Authorization", "range", "File-Path", "As-Task", "Password")
+	config.AllowHeaders = []string{"*"}
+	config.AllowMethods = []string{"*"}
 	r.Use(cors.New(config))
 }

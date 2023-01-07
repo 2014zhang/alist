@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/md5"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -36,15 +37,10 @@ func (d *Pan123) Config() driver.Config {
 }
 
 func (d *Pan123) GetAddition() driver.Additional {
-	return d.Addition
+	return &d.Addition
 }
 
-func (d *Pan123) Init(ctx context.Context, storage model.Storage) error {
-	d.Storage = storage
-	err := utils.Json.UnmarshalFromString(d.Storage.Addition, &d.Addition)
-	if err != nil {
-		return err
-	}
+func (d *Pan123) Init(ctx context.Context) error {
 	return d.login()
 }
 
@@ -62,14 +58,9 @@ func (d *Pan123) List(ctx context.Context, dir model.Obj, args model.ListArgs) (
 	})
 }
 
-//func (d *Pan123) Get(ctx context.Context, path string) (model.Obj, error) {
-//	// this is optional
-//	return nil, errs.NotImplement
-//}
-
 func (d *Pan123) Link(ctx context.Context, file model.Obj, args model.LinkArgs) (*model.Link, error) {
 	if f, ok := file.(File); ok {
-		var resp DownResp
+		//var resp DownResp
 		var headers map[string]string
 		if !utils.IsLocalIPAddr(args.IP) {
 			headers = map[string]string{
@@ -86,15 +77,24 @@ func (d *Pan123) Link(ctx context.Context, file model.Obj, args model.LinkArgs) 
 			"size":      f.Size,
 			"type":      f.Type,
 		}
-		_, err := d.request("https://www.123pan.com/api/file/download_info", http.MethodPost, func(req *resty.Request) {
+		resp, err := d.request("https://www.123pan.com/api/file/download_info", http.MethodPost, func(req *resty.Request) {
 			req.SetBody(data).SetHeaders(headers)
-		}, &resp)
+		}, nil)
 		if err != nil {
 			return nil, err
 		}
-		u, err := url.Parse(resp.Data.DownloadUrl)
+		downloadUrl := utils.Json.Get(resp, "data", "DownloadUrl").ToString()
+		u, err := url.Parse(downloadUrl)
 		if err != nil {
 			return nil, err
+		}
+		nu := u.Query().Get("params")
+		if nu != "" {
+			du, _ := base64.StdEncoding.DecodeString(nu)
+			u, err = url.Parse(string(du))
+			if err != nil {
+				return nil, err
+			}
 		}
 		u_ := fmt.Sprintf("https://%s%s", u.Host, u.Path)
 		res, err := base.NoRedirectClient.R().SetQueryParamsFromValues(u.Query()).Head(u_)
@@ -103,7 +103,7 @@ func (d *Pan123) Link(ctx context.Context, file model.Obj, args model.LinkArgs) 
 		}
 		log.Debug(res.String())
 		link := model.Link{
-			URL: resp.Data.DownloadUrl,
+			URL: downloadUrl,
 		}
 		log.Debugln("res code: ", res.StatusCode())
 		if res.StatusCode() == 302 {
@@ -220,13 +220,13 @@ func (d *Pan123) Put(ctx context.Context, dstDir model.Obj, stream model.FileStr
 		"type":         0,
 	}
 	var resp UploadResp
-	_, err := d.request("https://www.123pan.com/api/file/upload_request", http.MethodPost, func(req *resty.Request) {
-		req.SetBody(data)
+	_, err := d.request("https://www.123pan.com/a/api/file/upload_request", http.MethodPost, func(req *resty.Request) {
+		req.SetBody(data).SetContext(ctx)
 	}, &resp)
 	if err != nil {
 		return err
 	}
-	if resp.Data.Key == "" {
+	if resp.Data.Reuse || resp.Data.Key == "" {
 		return nil
 	}
 	cfg := &aws.Config{
@@ -245,14 +245,14 @@ func (d *Pan123) Put(ctx context.Context, dstDir model.Obj, stream model.FileStr
 		Key:    &resp.Data.Key,
 		Body:   uploadFile,
 	}
-	_, err = uploader.Upload(input)
+	_, err = uploader.UploadWithContext(ctx, input)
 	if err != nil {
 		return err
 	}
 	_, err = d.request("https://www.123pan.com/api/file/upload_complete", http.MethodPost, func(req *resty.Request) {
 		req.SetBody(base.Json{
 			"fileId": resp.Data.FileId,
-		})
+		}).SetContext(ctx)
 	}, nil)
 	return err
 }

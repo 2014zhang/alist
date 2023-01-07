@@ -15,7 +15,8 @@ var (
 	Conf *Config
 )
 
-var TypesMap = make(map[string][]string)
+var SlicesMap = make(map[string][]string)
+var FilenameCharMap = make(map[string]string)
 var PrivacyReg []*regexp.Regexp
 
 var (

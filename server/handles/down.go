@@ -36,6 +36,8 @@ func Down(c *gin.Context) {
 			common.ErrorResp(c, err, 500)
 			return
 		}
+		c.Header("Referrer-Policy", "no-referrer")
+		c.Header("Cache-Control", "max-age=0, no-cache, no-store, must-revalidate")
 		c.Redirect(302, link.URL)
 	}
 }
@@ -56,7 +58,7 @@ func Proxy(c *gin.Context) {
 				URL := fmt.Sprintf("%s%s?sign=%s",
 					strings.Split(downProxyUrl, "\n")[0],
 					utils.EncodePath(rawPath, true),
-					sign.Sign(filename))
+					sign.Sign(rawPath))
 				c.Redirect(302, URL)
 				return
 			}
@@ -89,7 +91,7 @@ func shouldProxy(storage driver.Driver, filename string) bool {
 	if storage.Config().MustProxy() || storage.GetStorage().WebProxy {
 		return true
 	}
-	if utils.SliceContains(conf.TypesMap[conf.ProxyTypes], utils.Ext(filename)) {
+	if utils.SliceContains(conf.SlicesMap[conf.ProxyTypes], utils.Ext(filename)) {
 		return true
 	}
 	return false
@@ -106,10 +108,10 @@ func canProxy(storage driver.Driver, filename string) bool {
 	if storage.Config().MustProxy() || storage.GetStorage().WebProxy || storage.GetStorage().WebdavProxy() {
 		return true
 	}
-	if utils.SliceContains(conf.TypesMap[conf.ProxyTypes], utils.Ext(filename)) {
+	if utils.SliceContains(conf.SlicesMap[conf.ProxyTypes], utils.Ext(filename)) {
 		return true
 	}
-	if utils.SliceContains(conf.TypesMap[conf.TextTypes], utils.Ext(filename)) {
+	if utils.SliceContains(conf.SlicesMap[conf.TextTypes], utils.Ext(filename)) {
 		return true
 	}
 	return false

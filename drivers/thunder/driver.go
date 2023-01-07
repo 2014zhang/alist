@@ -32,15 +32,10 @@ func (x *Thunder) Config() driver.Config {
 }
 
 func (x *Thunder) GetAddition() driver.Additional {
-	return x.Addition
+	return &x.Addition
 }
 
-func (x *Thunder) Init(ctx context.Context, storage model.Storage) (err error) {
-	x.Storage = storage
-	if err = utils.Json.UnmarshalFromString(x.Storage.Addition, &x.Addition); err != nil {
-		return err
-	}
-
+func (x *Thunder) Init(ctx context.Context) (err error) {
 	// 初始化所需参数
 	if x.XunLeiCommon == nil {
 		x.XunLeiCommon = &XunLeiCommon{
@@ -59,13 +54,18 @@ func (x *Thunder) Init(ctx context.Context, storage model.Storage) (err error) {
 					"j",
 					"4scKJNdd7F27Hv7tbt",
 				},
-				DeviceID:          "9aa5c268e7bcfc197a9ad88e2fb330e5",
+				DeviceID:          utils.GetMD5Encode(x.Username + x.Password),
 				ClientID:          "Xp6vsxz_7IYVw2BB",
 				ClientSecret:      "Xp6vsy4tN9toTVdMSpomVdXpRmES",
 				ClientVersion:     "7.51.0.8196",
 				PackageName:       "com.xunlei.downloadprovider",
 				UserAgent:         "ANDROID-com.xunlei.downloadprovider/7.51.0.8196 netWorkType/5G appid/40 deviceName/Xiaomi_M2004j7ac deviceModel/M2004J7AC OSVersion/12 protocolVersion/301 platformVersion/10 sdkVersion/220200 Oauth2Client/0.9 (Linux 4_14_186-perf-gddfs8vbb238b) (JAVA 0)",
 				DownloadUserAgent: "Dalvik/2.1.0 (Linux; U; Android 12; M2004J7AC Build/SP1A.210812.016)",
+
+				refreshCTokenCk: func(token string) {
+					x.CaptchaToken = token
+					op.MustSaveDriverStorage(x)
+				},
 			},
 			refreshTokenFunc: func() error {
 				// 通过RefreshToken刷新
@@ -88,7 +88,6 @@ func (x *Thunder) Init(ctx context.Context, storage model.Storage) (err error) {
 	ctoekn := strings.TrimSpace(x.CaptchaToken)
 	if ctoekn != "" {
 		x.SetCaptchaToken(ctoekn)
-		x.CaptchaToken = ""
 	}
 
 	// 防止重复登录
@@ -122,15 +121,10 @@ func (x *ThunderExpert) Config() driver.Config {
 }
 
 func (x *ThunderExpert) GetAddition() driver.Additional {
-	return x.ExpertAddition
+	return &x.ExpertAddition
 }
 
-func (x *ThunderExpert) Init(ctx context.Context, storage model.Storage) (err error) {
-	x.Storage = storage
-	if err = utils.Json.UnmarshalFromString(x.Storage.Addition, &x.ExpertAddition); err != nil {
-		return err
-	}
-
+func (x *ThunderExpert) Init(ctx context.Context) (err error) {
 	// 防止重复登录
 	identity := x.GetIdentity()
 	if identity != x.identity || !x.IsLogin() {
@@ -139,7 +133,12 @@ func (x *ThunderExpert) Init(ctx context.Context, storage model.Storage) (err er
 			Common: &Common{
 				client: base.NewRestyClient(),
 
-				DeviceID:          x.DeviceID,
+				DeviceID: func() string {
+					if len(x.DeviceID) != 32 {
+						return utils.GetMD5Encode(x.DeviceID)
+					}
+					return x.DeviceID
+				}(),
 				ClientID:          x.ClientID,
 				ClientSecret:      x.ClientSecret,
 				ClientVersion:     x.ClientVersion,
@@ -147,12 +146,16 @@ func (x *ThunderExpert) Init(ctx context.Context, storage model.Storage) (err er
 				UserAgent:         x.UserAgent,
 				DownloadUserAgent: x.DownloadUserAgent,
 				UseVideoUrl:       x.UseVideoUrl,
+
+				refreshCTokenCk: func(token string) {
+					x.CaptchaToken = token
+					op.MustSaveDriverStorage(x)
+				},
 			},
 		}
 
 		if x.CaptchaToken != "" {
 			x.SetCaptchaToken(x.CaptchaToken)
-			x.CaptchaToken = ""
 		}
 
 		// 签名方法
@@ -206,7 +209,6 @@ func (x *ThunderExpert) Init(ctx context.Context, storage model.Storage) (err er
 		// 仅修改验证码token
 		if x.CaptchaToken != "" {
 			x.SetCaptchaToken(x.CaptchaToken)
-			x.CaptchaToken = ""
 		}
 		x.XunLeiCommon.UserAgent = x.UserAgent
 		x.XunLeiCommon.DownloadUserAgent = x.DownloadUserAgent

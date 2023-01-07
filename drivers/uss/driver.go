@@ -25,15 +25,10 @@ func (d *USS) Config() driver.Config {
 }
 
 func (d *USS) GetAddition() driver.Additional {
-	return d.Addition
+	return &d.Addition
 }
 
-func (d *USS) Init(ctx context.Context, storage model.Storage) error {
-	d.Storage = storage
-	err := utils.Json.UnmarshalFromString(d.Storage.Addition, &d.Addition)
-	if err != nil {
-		return err
-	}
+func (d *USS) Init(ctx context.Context) error {
 	d.client = upyun.NewUpYun(&upyun.UpYunConfig{
 		Bucket:   d.Bucket,
 		Operator: d.OperatorName,
@@ -49,19 +44,17 @@ func (d *USS) Drop(ctx context.Context) error {
 func (d *USS) List(ctx context.Context, dir model.Obj, args model.ListArgs) ([]model.Obj, error) {
 	prefix := getKey(dir.GetPath(), true)
 	objsChan := make(chan *upyun.FileInfo, 10)
-	var err error
-	defer close(objsChan)
-	go func() {
-		err = d.client.List(&upyun.GetObjectsConfig{
-			Path:           prefix,
-			ObjectsChan:    objsChan,
-			MaxListObjects: 0,
-			MaxListLevel:   1,
-		})
-	}()
-	if err != nil {
+
+	cfg := &upyun.GetObjectsConfig{
+		Path:           prefix,
+		ObjectsChan:    objsChan,
+		MaxListObjects: 0,
+		MaxListLevel:   1,
+	}
+	if err := d.client.List(cfg); err != nil {
 		return nil, err
 	}
+
 	res := make([]model.Obj, 0)
 	for obj := range objsChan {
 		t := obj.Time
@@ -73,13 +66,8 @@ func (d *USS) List(ctx context.Context, dir model.Obj, args model.ListArgs) ([]m
 		}
 		res = append(res, &f)
 	}
-	return res, err
+	return res, nil
 }
-
-//func (d *USS) Get(ctx context.Context, path string) (model.Obj, error) {
-//	// this is optional
-//	return nil, errs.NotImplement
-//}
 
 func (d *USS) Link(ctx context.Context, file model.Obj, args model.LinkArgs) (*model.Link, error) {
 	key := getKey(file.GetPath(), false)
@@ -133,6 +121,7 @@ func (d *USS) Remove(ctx context.Context, obj model.Obj) error {
 }
 
 func (d *USS) Put(ctx context.Context, dstDir model.Obj, stream model.FileStreamer, up driver.UpdateProgress) error {
+	// TODO not support cancel??
 	return d.client.Put(&upyun.PutObjectConfig{
 		Path:   getKey(path.Join(dstDir.GetPath(), stream.GetName()), false),
 		Reader: stream,

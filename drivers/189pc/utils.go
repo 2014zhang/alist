@@ -47,7 +47,7 @@ const (
 	CHANNEL_ID = "web_cloud.189.cn"
 )
 
-func (y *Yun189PC) request(url, method string, callback base.ReqCallback, params Params, resp interface{}) ([]byte, error) {
+func (y *Cloud189PC) request(url, method string, callback base.ReqCallback, params Params, resp interface{}) ([]byte, error) {
 	dateOfGmt := getHttpDateStr()
 	sessionKey := y.tokenInfo.SessionKey
 	sessionSecret := y.tokenInfo.SessionSecret
@@ -124,15 +124,15 @@ func (y *Yun189PC) request(url, method string, callback base.ReqCallback, params
 	}
 }
 
-func (y *Yun189PC) get(url string, callback base.ReqCallback, resp interface{}) ([]byte, error) {
+func (y *Cloud189PC) get(url string, callback base.ReqCallback, resp interface{}) ([]byte, error) {
 	return y.request(url, http.MethodGet, callback, nil, resp)
 }
 
-func (y *Yun189PC) post(url string, callback base.ReqCallback, resp interface{}) ([]byte, error) {
+func (y *Cloud189PC) post(url string, callback base.ReqCallback, resp interface{}) ([]byte, error) {
 	return y.request(url, http.MethodPost, callback, nil, resp)
 }
 
-func (y *Yun189PC) getFiles(ctx context.Context, fileId string) ([]model.Obj, error) {
+func (y *Cloud189PC) getFiles(ctx context.Context, fileId string) ([]model.Obj, error) {
 	fullUrl := API_URL
 	if y.isFamily() {
 		fullUrl += "/family/file"
@@ -184,22 +184,21 @@ func (y *Yun189PC) getFiles(ctx context.Context, fileId string) ([]model.Obj, er
 	return res, nil
 }
 
-func (y *Yun189PC) login() (err error) {
+func (y *Cloud189PC) login() (err error) {
 	// 初始化登陆所需参数
-	if y.loginParam == nil {
+	if y.loginParam == nil || !y.NoUseOcr {
 		if err = y.initLoginParam(); err != nil {
 			// 验证码也通过错误返回
 			return err
 		}
 	}
-
 	defer func() {
 		// 销毁验证码
 		y.VCode = ""
 		// 销毁登陆参数
 		y.loginParam = nil
 		// 遇到错误，重新加载登陆参数
-		if err != nil {
+		if err != nil && y.NoUseOcr {
 			if err1 := y.initLoginParam(); err1 != nil {
 				err = fmt.Errorf("err1: %s \nerr2: %s", err, err1)
 			}
@@ -265,7 +264,7 @@ func (y *Yun189PC) login() (err error) {
 /* 初始化登陆需要的参数
 *  如果遇到验证码返回错误
  */
-func (y *Yun189PC) initLoginParam() error {
+func (y *Cloud189PC) initLoginParam() error {
 	// 清除cookie
 	jar, _ := cookiejar.New(nil)
 	y.client.SetCookieJar(jar)
@@ -303,50 +302,40 @@ func (y *Yun189PC) initLoginParam() error {
 	param.jRsaKey = fmt.Sprintf("-----BEGIN PUBLIC KEY-----\n%s\n-----END PUBLIC KEY-----", encryptConf.Data.PubKey)
 	param.RsaUsername = encryptConf.Data.Pre + RsaEncrypt(param.jRsaKey, y.Username)
 	param.RsaPassword = encryptConf.Data.Pre + RsaEncrypt(param.jRsaKey, y.Password)
-
-	// 判断是否需要验证码
-	res, err = y.client.R().
-		SetFormData(map[string]string{
-			"appKey":      APP_ID,
-			"accountType": ACCOUNT_TYPE,
-			"userName":    param.RsaUsername,
-		}).
-		Post(AUTH_URL + "/api/logbox/oauth2/needcaptcha.do")
-	if err != nil {
-		return err
-	}
-
 	y.loginParam = &param
-	if res.String() != "0" {
-		imgRes, err := y.client.R().
-			SetQueryParams(map[string]string{
-				"token": param.CaptchaToken,
-				"REQID": param.ReqId,
-				"rnd":   fmt.Sprint(timestamp()),
-			}).
-			Get(AUTH_URL + "/api/logbox/oauth2/picCaptcha.do")
-		if err != nil {
-			return fmt.Errorf("failed to obtain verification code")
+
+	imgRes, err := y.client.R().
+		SetQueryParams(map[string]string{
+			"token": param.CaptchaToken,
+			"REQID": param.ReqId,
+			"rnd":   fmt.Sprint(timestamp()),
+		}).
+		Get(AUTH_URL + "/api/logbox/oauth2/picCaptcha.do")
+	if err != nil {
+		return fmt.Errorf("failed to obtain verification code")
+	}
+	if imgRes.Size() > 20 {
+		if setting.GetStr(conf.OcrApi) != "" && !y.NoUseOcr {
+			vRes, err := base.RestyClient.R().
+				SetMultipartField("image", "validateCode.png", "image/png", bytes.NewReader(imgRes.Body())).
+				Post(setting.GetStr(conf.OcrApi))
+			if err != nil {
+				return err
+			}
+			if jsoniter.Get(vRes.Body(), "status").ToInt() == 200 {
+				y.VCode = jsoniter.Get(vRes.Body(), "result").ToString()
+				return nil
+			}
 		}
 
-		// 尝试使用ocr
-		vRes, err := base.RestyClient.R().
-			SetMultipartField("image", "validateCode.png", "image/png", bytes.NewReader(imgRes.Body())).
-			Post(setting.GetStr(conf.OcrApi))
-		if err == nil && jsoniter.Get(vRes.Body(), "status").ToInt() == 200 {
-			y.VCode = jsoniter.Get(vRes.Body(), "result").ToString()
-		}
-
-		// ocr无法处理，返回验证码图片给前端
-		if len(y.VCode) != 4 {
-			return fmt.Errorf("need validate code: data:image/png;base64,%s", base64.StdEncoding.EncodeToString(res.Body()))
-		}
+		// 返回验证码图片给前端
+		return fmt.Errorf(`need img validate code: <img src="data:image/png;base64,%s"/>`, base64.StdEncoding.EncodeToString(imgRes.Body()))
 	}
 	return nil
 }
 
 // 刷新会话
-func (y *Yun189PC) refreshSession() (err error) {
+func (y *Cloud189PC) refreshSession() (err error) {
 	var erron RespErr
 	var userSessionResp UserSessionResp
 	_, err = y.client.R().
@@ -392,10 +381,11 @@ func (y *Yun189PC) refreshSession() (err error) {
 }
 
 // 普通上传
-func (y *Yun189PC) CommonUpload(ctx context.Context, dstDir model.Obj, file model.FileStreamer, up driver.UpdateProgress) (err error) {
+func (y *Cloud189PC) CommonUpload(ctx context.Context, dstDir model.Obj, file model.FileStreamer, up driver.UpdateProgress) (err error) {
 	const DEFAULT int64 = 10485760
 	var count = int64(math.Ceil(float64(file.GetSize()) / float64(DEFAULT)))
 
+	requestID := uuid.NewString()
 	params := Params{
 		"parentFolderId": dstDir.GetID(),
 		"fileName":       url.QueryEscape(file.GetName()),
@@ -417,6 +407,7 @@ func (y *Yun189PC) CommonUpload(ctx context.Context, dstDir model.Obj, file mode
 	var initMultiUpload InitMultiUploadResp
 	_, err = y.request(fullUrl+"/initMultiUpload", http.MethodGet, func(req *resty.Request) {
 		req.SetContext(ctx)
+		req.SetHeader("X-Request-ID", requestID)
 	}, params, &initMultiUpload)
 	if err != nil {
 		return err
@@ -427,10 +418,8 @@ func (y *Yun189PC) CommonUpload(ctx context.Context, dstDir model.Obj, file mode
 	silceMd5Hexs := make([]string, 0, count)
 	byteData := bytes.NewBuffer(make([]byte, DEFAULT))
 	for i := int64(1); i <= count; i++ {
-		select {
-		case <-ctx.Done():
+		if utils.IsCanceled(ctx) {
 			return ctx.Err()
-		default:
 		}
 
 		// 读取块
@@ -451,6 +440,7 @@ func (y *Yun189PC) CommonUpload(ctx context.Context, dstDir model.Obj, file mode
 		_, err = y.request(fullUrl+"/getMultiUploadUrls", http.MethodGet,
 			func(req *resty.Request) {
 				req.SetContext(ctx)
+				req.SetHeader("X-Request-ID", requestID)
 			}, Params{
 				"partInfo":     fmt.Sprintf("%d-%s", i, silceMd5Base64),
 				"uploadFileId": initMultiUpload.Data.UploadFileID,
@@ -486,6 +476,7 @@ func (y *Yun189PC) CommonUpload(ctx context.Context, dstDir model.Obj, file mode
 	_, err = y.request(fullUrl+"/commitMultiUploadFile", http.MethodGet,
 		func(req *resty.Request) {
 			req.SetContext(ctx)
+			req.SetHeader("X-Request-ID", requestID)
 		}, Params{
 			"uploadFileId": initMultiUpload.Data.UploadFileID,
 			"fileMd5":      fileMd5Hex,
@@ -498,7 +489,7 @@ func (y *Yun189PC) CommonUpload(ctx context.Context, dstDir model.Obj, file mode
 }
 
 // 快传
-func (y *Yun189PC) FastUpload(ctx context.Context, dstDir model.Obj, file model.FileStreamer, up driver.UpdateProgress) (err error) {
+func (y *Cloud189PC) FastUpload(ctx context.Context, dstDir model.Obj, file model.FileStreamer, up driver.UpdateProgress) (err error) {
 	// 需要获取完整文件md5,必须支持 io.Seek
 	tempFile, err := utils.CreateTempFile(file.GetReadCloser())
 	if err != nil {
@@ -518,10 +509,8 @@ func (y *Yun189PC) FastUpload(ctx context.Context, dstDir model.Obj, file model.
 	silceMd5Hexs := make([]string, 0, count)
 	silceMd5Base64s := make([]string, 0, count)
 	for i := 1; i <= count; i++ {
-		select {
-		case <-ctx.Done():
+		if utils.IsCanceled(ctx) {
 			return ctx.Err()
-		default:
 		}
 
 		silceMd5.Reset()
@@ -542,6 +531,7 @@ func (y *Yun189PC) FastUpload(ctx context.Context, dstDir model.Obj, file model.
 		sliceMd5Hex = strings.ToUpper(utils.GetMD5Encode(strings.Join(silceMd5Hexs, "\n")))
 	}
 
+	requestID := uuid.NewString()
 	// 检测是否支持快传
 	params := Params{
 		"parentFolderId": dstDir.GetID(),
@@ -564,6 +554,7 @@ func (y *Yun189PC) FastUpload(ctx context.Context, dstDir model.Obj, file model.
 	var uploadInfo InitMultiUploadResp
 	_, err = y.request(fullUrl+"/initMultiUpload", http.MethodGet, func(req *resty.Request) {
 		req.SetContext(ctx)
+		req.SetHeader("X-Request-ID", requestID)
 	}, params, &uploadInfo)
 	if err != nil {
 		return err
@@ -575,6 +566,7 @@ func (y *Yun189PC) FastUpload(ctx context.Context, dstDir model.Obj, file model.
 		_, err = y.request(fullUrl+"/getMultiUploadUrls", http.MethodGet,
 			func(req *resty.Request) {
 				req.SetContext(ctx)
+				req.SetHeader("X-Request-ID", requestID)
 			}, Params{
 				"uploadFileId": uploadInfo.Data.UploadFileID,
 				"partInfo":     strings.Join(silceMd5Base64s, ","),
@@ -611,6 +603,7 @@ func (y *Yun189PC) FastUpload(ctx context.Context, dstDir model.Obj, file model.
 	_, err = y.request(fullUrl+"/commitMultiUploadFile", http.MethodGet,
 		func(req *resty.Request) {
 			req.SetContext(ctx)
+			req.SetHeader("X-Request-ID", requestID)
 		}, Params{
 			"uploadFileId": uploadInfo.Data.UploadFileID,
 			"isLog":        "0",
@@ -619,11 +612,11 @@ func (y *Yun189PC) FastUpload(ctx context.Context, dstDir model.Obj, file model.
 	return err
 }
 
-func (y *Yun189PC) isFamily() bool {
+func (y *Cloud189PC) isFamily() bool {
 	return y.Type == "family"
 }
 
-func (y *Yun189PC) isLogin() bool {
+func (y *Cloud189PC) isLogin() bool {
 	if y.tokenInfo == nil {
 		return false
 	}
@@ -632,7 +625,7 @@ func (y *Yun189PC) isLogin() bool {
 }
 
 // 获取家庭云所有用户信息
-func (y *Yun189PC) getFamilyInfoList() ([]FamilyInfoResp, error) {
+func (y *Cloud189PC) getFamilyInfoList() ([]FamilyInfoResp, error) {
 	var resp FamilyInfoListResp
 	_, err := y.get(API_URL+"/family/manage/getFamilyList.action", nil, &resp)
 	if err != nil {
@@ -642,7 +635,7 @@ func (y *Yun189PC) getFamilyInfoList() ([]FamilyInfoResp, error) {
 }
 
 // 抽取家庭云ID
-func (y *Yun189PC) getFamilyID() (string, error) {
+func (y *Cloud189PC) getFamilyID() (string, error) {
 	infos, err := y.getFamilyInfoList()
 	if err != nil {
 		return "", err

@@ -2,6 +2,7 @@ package _189
 
 import (
 	"bytes"
+	"context"
 	"crypto/md5"
 	"encoding/base64"
 	"encoding/hex"
@@ -178,7 +179,6 @@ func (d *Cloud189) request(url string, method string, callback base.ReqCallback,
 func (d *Cloud189) getFiles(fileId string) ([]model.Obj, error) {
 	res := make([]model.Obj, 0)
 	pageNum := 1
-	loc, _ := time.LoadLocation("Local")
 	for {
 		var resp Files
 		_, err := d.request("https://cloud.189.cn/api/open/file/listFiles.action", http.MethodGet, func(req *resty.Request) {
@@ -200,7 +200,7 @@ func (d *Cloud189) getFiles(fileId string) ([]model.Obj, error) {
 			break
 		}
 		for _, folder := range resp.FileListAO.FolderList {
-			lastOpTime, _ := time.ParseInLocation("2006-01-02 15:04:05", folder.LastOpTime, loc)
+			lastOpTime := utils.MustParseCNTime(folder.LastOpTime)
 			res = append(res, &model.Object{
 				ID:       strconv.FormatInt(folder.Id, 10),
 				Name:     folder.Name,
@@ -209,7 +209,7 @@ func (d *Cloud189) getFiles(fileId string) ([]model.Obj, error) {
 			})
 		}
 		for _, file := range resp.FileListAO.FileList {
-			lastOpTime, _ := time.ParseInLocation("2006-01-02 15:04:05", file.LastOpTime, loc)
+			lastOpTime := utils.MustParseCNTime(file.LastOpTime)
 			res = append(res, &model.ObjThumb{
 				Object: model.Object{
 					ID:       strconv.FormatInt(file.Id, 10),
@@ -307,7 +307,7 @@ func (d *Cloud189) uploadRequest(uri string, form map[string]string, resp interf
 	return data, nil
 }
 
-func (d *Cloud189) newUpload(dstDir model.Obj, file model.FileStreamer, up driver.UpdateProgress) error {
+func (d *Cloud189) newUpload(ctx context.Context, dstDir model.Obj, file model.FileStreamer, up driver.UpdateProgress) error {
 	sessionKey, err := d.getSessionKey()
 	if err != nil {
 		return err
@@ -336,6 +336,9 @@ func (d *Cloud189) newUpload(dstDir model.Obj, file model.FileStreamer, up drive
 	md5s := make([]string, 0)
 	md5Sum := md5.New()
 	for i = 1; i <= count; i++ {
+		if utils.IsCanceled(ctx) {
+			return ctx.Err()
+		}
 		byteSize = file.GetSize() - finish
 		if DEFAULT < byteSize {
 			byteSize = DEFAULT
@@ -365,12 +368,15 @@ func (d *Cloud189) newUpload(dstDir model.Obj, file model.FileStreamer, up drive
 		log.Debugf("uploadData: %+v", uploadData)
 		requestURL := uploadData.RequestURL
 		uploadHeaders := strings.Split(decodeURIComponent(uploadData.RequestHeader), "&")
-		req, _ := http.NewRequest(http.MethodPut, requestURL, bytes.NewReader(byteData))
+		req, err := http.NewRequest(http.MethodPut, requestURL, bytes.NewReader(byteData))
+		if err != nil {
+			return err
+		}
+		req = req.WithContext(ctx)
 		for _, v := range uploadHeaders {
 			i := strings.Index(v, "=")
 			req.Header.Set(v[0:i], v[i+1:])
 		}
-
 		r, err := base.HttpClient.Do(req)
 		log.Debugf("%+v %+v", r, r.Request.Header)
 		r.Body.Close()

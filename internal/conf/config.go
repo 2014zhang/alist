@@ -1,6 +1,9 @@
 package conf
 
 import (
+	"path/filepath"
+
+	"github.com/alist-org/alist/v3/cmd/flags"
 	"github.com/alist-org/alist/v3/pkg/utils/random"
 )
 
@@ -42,28 +45,36 @@ type Config struct {
 	Database       Database  `json:"database"`
 	Scheme         Scheme    `json:"scheme"`
 	TempDir        string    `json:"temp_dir" env:"TEMP_DIR"`
+	BleveDir       string    `json:"bleve_dir" env:"BLEVE_DIR"`
 	Log            LogConfig `json:"log"`
+	MaxConnections int       `json:"max_connections" env:"MAX_CONNECTIONS"`
 }
 
 func DefaultConfig() *Config {
+	tempDir := filepath.Join(flags.DataDir, "temp")
+	indexDir := filepath.Join(flags.DataDir, "bleve")
+	logPath := filepath.Join(flags.DataDir, "log/log.log")
+	dbPath := filepath.Join(flags.DataDir, "data.db")
 	return &Config{
 		Address:        "0.0.0.0",
 		Port:           5244,
 		JwtSecret:      random.String(16),
 		TokenExpiresIn: 48,
-		TempDir:        "data/temp",
+		TempDir:        tempDir,
 		Database: Database{
 			Type:        "sqlite3",
 			Port:        0,
 			TablePrefix: "x_",
-			DBFile:      "data/data.db",
+			DBFile:      dbPath,
 		},
+		BleveDir: indexDir,
 		Log: LogConfig{
 			Enable:     true,
-			Name:       "log/log.log",
+			Name:       logPath,
 			MaxSize:    10,
 			MaxBackups: 5,
 			MaxAge:     28,
 		},
+		MaxConnections: 0,
 	}
 }
